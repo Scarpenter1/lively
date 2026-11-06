@@ -121,21 +121,19 @@ namespace Lively.Core.Wallpapers
 
         public void Pause()
         {
-            // The "System Idle Process" is given process ID 0, Kernel is 1.
-            if (!IsContentReady || cefD3DRenderingSubProcessPid == 0)
+            if (!IsContentReady)
                 return;
 
-            // Cef spawns multiple subprocess but "Intermediate D3D Window" seems to do the trick..
-            _ = NativeMethods.DebugActiveProcess((uint)cefD3DRenderingSubProcessPid);
+            // The player freezes the page itself. Suspending the GPU subprocess with DebugActiveProcess
+            // could hang the desktop, since its window shares an input queue with Explorer's WorkerW.
             SendMessage(new LivelySuspendCmd()); //"{\"Type\":7}"
         }
 
         public void Play()
         {
-            if (!IsContentReady || cefD3DRenderingSubProcessPid == 0)
+            if (!IsContentReady)
                 return;
 
-            _ = NativeMethods.DebugActiveProcessStop((uint)cefD3DRenderingSubProcessPid);
             SendMessage(new LivelyResumeCmd()); //"{\"Type\":8}"
         }
 

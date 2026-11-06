@@ -242,9 +242,44 @@ namespace Lively.Player.WebView2
             this.Invoke((MethodInvoker)(() => this.Text = webView.CoreWebView2.DocumentTitle));
         }
 
+        /// <summary>
+        /// Freezes the page (timers, requestAnimationFrame, JS execution) through the DevTools protocol.
+        /// The last rendered frame stays on screen and no OS process or thread is suspended.
+        /// </summary>
+        /// <remarks>
+        /// Replaces suspending the GPU subprocess that owns the "Intermediate D3D Window" with DebugActiveProcess.
+        /// That window lives in a window tree parented to Explorer's WorkerW, so its thread shares an input queue
+        /// with the desktop. Freezing it could leave the desktop unable to process input until explorer.exe or
+        /// Lively was killed.
+        /// Ref: https://chromedevtools.github.io/devtools-protocol/tot/Page/#method-setWebLifecycleState
+        /// </remarks>
+        private async Task FreezePage()
+        {
+            try
+            {
+                await webView.CoreWebView2.CallDevToolsProtocolMethodAsync("Page.setWebLifecycleState", "{\"state\":\"frozen\"}");
+            }
+            catch (Exception ex)
+            {
+                ex.SendError(SendToParent, "Failed to freeze page");
+            }
+        }
+
+        private async Task UnfreezePage()
+        {
+            try
+            {
+                await webView.CoreWebView2.CallDevToolsProtocolMethodAsync("Page.setWebLifecycleState", "{\"state\":\"active\"}");
+            }
+            catch (Exception ex)
+            {
+                ex.SendError(SendToParent, "Failed to unfreeze page");
+            }
+        }
+
         private void CoreWebView2_ProcessFailed(object sender, CoreWebView2ProcessFailedEventArgs e)
         {
-            // Expected behavior: DebugActiveProcess(CEF_D3DRenderingSubProcess)
+            // A frozen page can be reported as unresponsive while paused.
             // Ref: https://learn.microsoft.com/en-us/dotnet/api/microsoft.web.webview2.core.corewebview2processfailedkind
             if (isPaused && e.Reason == CoreWebView2ProcessFailedReason.Unresponsive)
                 return;
@@ -417,12 +452,17 @@ namespace Lively.Player.WebView2
                                                     await webView.ExecuteScriptFunctionAsync("livelyWallpaperPlaybackChanged",
                                                         JsonConvert.SerializeObject(new WallpaperPlaybackState() { IsPaused = true }),
                                                         Formatting.Indented);
+
+                                                // Freeze last, so the page can still handle the pause event above.
+                                                await FreezePage();
                                             }
                                             isPaused = true;
                                             break;
                                         case MessageType.cmd_resume:
                                             if (isPaused)
                                             {
+                                                await UnfreezePage();
+
                                                 if (startArgs.PauseWebMedia || isVideoStream)
                                                     await webView.TryPlayMedia();
 
